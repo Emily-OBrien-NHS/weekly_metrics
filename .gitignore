@@ -1,0 +1,26 @@
+# any excel files
+*.xlsx
+
+#any csv files
+*.csv
+
+#any html files
+*.html
+
+#any pptx files
+*.pptx
+
+#plots folder
+plots/
+
+#outputs
+outputs/
+
+#pbi filed
+*.pbix
+
+#pyc files
+*.pyc
+
+#word files
+*.docx
