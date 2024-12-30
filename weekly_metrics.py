@@ -158,8 +158,8 @@ def Correlations(original, recent):
         row = corr.iloc[i]
         data1, data2 = row[['Metric 1', 'Metric 2']]
         #get the two data series
-        og = original[[data1, data2]].dropna(how='all')
-        rec = recent[[data1, data2]].dropna(how='all')
+        og = original[[data1, data2]].dropna(how='any')
+        rec = recent[[data1, data2]].dropna(how='any')
         #transform the r/coeficient values into z scores (fishers r to z transformation)
         n1 = len(og)
         n2 = len(rec)    
@@ -167,7 +167,10 @@ def Correlations(original, recent):
         z1 = np.arctanh(r1)
         z2 = np.arctanh(r2)
         #determine the observed z test statistic:
-        z_obs = ((z1 - z2) / (((1/(n1-3)) + (1/(n2-3)))**0.5))
+        if (n1 > 3) and (n2 > 3):
+            z_obs = ((z1 - z2) / (((1/(n1-3)) + (1/(n2-3)))**0.5))
+        else:
+            z_obs = np.nan
         sig_diff_test.append([z1, z2, z_obs, abs(z_obs) > critical_value])
         #If observed is less than the critical value, then the difference is significant
         #https://www.statisticssolutions.com/comparing-correlation-coefficients/#:~:text=The%20way%20to%20do%20this,the%20observed%20z%20test%20statistic.
@@ -186,7 +189,8 @@ def Forecasts(pivot):
     #To ensure we keep the key metrics, fill their nans in then drop all
     #other nan rows
     key_metrics = ['ED - Patients awaiting admission at 8AM',
-                   'ED Majors mean occupancy',
+                   'Ambulance handovers - Hours lost >15 minutes',
+                   'ED mean LoS (mins)',
                    'No right to reside - % of occupied beds']
     pivot_[key_metrics] = pivot_[key_metrics].fillna(0)
     pivot_ = pivot_.dropna(axis=1)
@@ -238,10 +242,10 @@ def Forecasts(pivot):
             prediction = lin.predict(X_pred[features])[0]
 
             #Work out if this is a high/low forecast
-            gt_pvalue = stats.mannwhitneyu(y_fit, prediction,
+            gt_pvalue = stats.mannwhitneyu(prediction, y_fit, 
                                            alternative='greater',
                                            nan_policy='omit')[1]
-            lt_pvalue = stats.mannwhitneyu(y_fit, prediction,
+            lt_pvalue = stats.mannwhitneyu( prediction, y_fit,
                                            alternative='less',
                                            nan_policy='omit')[1]
             if gt_pvalue < 0.05:
@@ -263,14 +267,12 @@ def Forecasts(pivot):
                                   .apply(lambda x: [i for i in x if i in low]))
         return forecasts
 
-            
-
-
-
-
 def main():
     pivot, original, recent = GetData()
     outliers, recent_trend = OutliersAndRecent(original, recent)
     correlations = Correlations(original, recent)
     forecasts = Forecasts(pivot)
-    return pivot, original, recent, outliers, recent_trend, correlations
+    return pivot, original, recent, outliers, recent_trend, correlations, forecasts
+
+pivot, original, recent = GetData()
+x=5
