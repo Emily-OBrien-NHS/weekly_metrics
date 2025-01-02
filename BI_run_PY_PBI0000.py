@@ -5,4 +5,4 @@ module = importlib.util.module_from_spec(spec)
 import pandas as pd
 spec.loader.exec_module(module)
 
-pivot, original, recent, outliers, recent_trend, correlations, forecasts = module.main()
+full_data, historical, last_7_days, outliers, recent_trend, correlations, forecasts, metrics = module.main()
