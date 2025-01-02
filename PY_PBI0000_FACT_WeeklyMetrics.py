@@ -1,13 +1,10 @@
-from sqlalchemy import create_engine
-from datetime import date
-from dateutil.relativedelta import relativedelta
-import matplotlib.pyplot as plt
-from scipy import stats
-import pandas as pd
 import numpy as np
-import pyodbc
+import pandas as pd
+from datetime import date
+from scipy import stats
+from sqlalchemy import create_engine
+from dateutil.relativedelta import relativedelta
 from sklearn.metrics import mean_squared_error
-from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.feature_selection import SelectKBest, f_regression
@@ -69,7 +66,7 @@ def GetData():
     recent = pivot.loc[pivot.index
                     >= pd.to_datetime(date.today()
                                         - relativedelta(days=+7))].copy()
-    return pivot, original, recent
+    return df, pivot, original, recent
 
 
 #===========================================================================
@@ -121,6 +118,7 @@ def OutliersAndRecent(original, recent):
     outliers = (pd.DataFrame(all_outliers,
                             columns=['Date', 'Data', 'Type', 'Metric'])
                             [['Metric', 'Date', 'Data', 'Type']])
+    outliers['Data'] = outliers['Data'].round(2)
     #create dataframe of recent trends.
     recent_trend = pd.DataFrame(recent_trend,
                                 columns=['Metric', 'Last 7 Day Trend',
@@ -142,16 +140,20 @@ def Correlations(original, recent):
     recent_corr.index.names = ['Metric 1', 'Metric 2']
     recent_corr = pd.DataFrame(recent_corr, columns=['Recent'])
     #Join and compare
-    corr = og_corr.join(recent_corr).reset_index()
-    corr['pair'] = [sorted(i) for i in corr[['Metric 1', 'Metric 2']].values.tolist()]
-    corr = corr.drop_duplicates(subset='pair')
-    corr = corr.loc[corr['Metric 1'] != corr['Metric 2'],
-                    ['Metric 1', 'Metric 2', 'Original', 'Recent']].copy()
-    corr['Correlation Difference'] = abs(corr['Original'] - corr['Recent'])
+    correlations = og_corr.join(recent_corr).reset_index()
+    correlations['pair'] = [sorted(i) for i in correlations[['Metric 1', 'Metric 2']].values.tolist()]
+    correlations = correlations.drop_duplicates(subset='pair')
+    #Filter out where correlation is 1 or -1 (round for float point error)
+    correlations = correlations.loc[
+                   (correlations['Metric 1'] != correlations['Metric 2'])
+                    & (abs(correlations['Original']).round(7) != 1)
+                    & (abs(correlations['Recent']).round(7) != 1),
+                    ['Metric 1', 'Metric 2', 'Original',
+                     'Recent']].reset_index(drop=True).copy()
     critical_value = abs(stats.norm.ppf(0.01))
     sig_diff_test = []
-    for i in range(len(corr)):
-        row = corr.iloc[i]
+    for i in range(len(correlations)):
+        row = correlations.iloc[i]
         data1, data2 = row[['Metric 1', 'Metric 2']]
         #get the two data series
         og = original[[data1, data2]].dropna(how='any')
@@ -167,15 +169,20 @@ def Correlations(original, recent):
             z_obs = ((z1 - z2) / (((1/(n1-3)) + (1/(n2-3)))**0.5))
         else:
             z_obs = np.nan
-        sig_diff_test.append([z1, z2, z_obs, abs(z_obs) > critical_value])
+        sig_diff_test.append([z_obs, abs(z_obs) > critical_value])
         #If observed is less than the critical value, then the difference is significant
         #https://www.statisticssolutions.com/comparing-correlation-coefficients/#:~:text=The%20way%20to%20do%20this,the%20observed%20z%20test%20statistic.
-    corr[['Z1 Score', 'Z2 Score', 'Z Obs Score',
-          'Significant Difference']] = sig_diff_test
-    corr = (corr.loc[corr['Significant Difference']].copy()
+    correlations[['Z Obs Score', 'Significant Difference']] = sig_diff_test
+    #Filter to only those where the correlation has changed significantly
+    correlations = (correlations.loc[correlations['Significant Difference']].copy()
             .sort_values(by='Z Obs Score', key=abs, ascending=False)
-            .reset_index())
-    return corr
+            .reset_index(drop=True).reset_index())
+    #Melt so one metric column to create relationships in BI
+    correlations = correlations.melt(id_vars=['index', 'Z Obs Score'],
+                                     value_vars=['Metric 1', 'Metric 2']
+                                     ).sort_values(by='index')
+    correlations.columns = ['index', 'Obs Score', 'Metric No.', 'Metric']
+    return correlations
 
 def Forecasts(pivot):
     #Take a copy of the data
@@ -254,20 +261,35 @@ def Forecasts(pivot):
                 high_or_low = ''
 
             #Append results to list and increase lag
-            results.append([key, lag, prediction, high_or_low, features])
+            results.append([key, lag,
+                 (date.today() + relativedelta(days=+lag)).strftime('%d/%m/%Y'),
+                  prediction, high_or_low, features] + features)
             lag += 1
 
-    forecasts = pd.DataFrame(results, columns=['Metric', 'Days Time',
-                                    'Prediction', 'High or Low', 'Causes'])
-    forecasts['High Causes'] = (forecasts['Causes']
+    forecasts = pd.DataFrame(results, columns=['Metric', 'Days Time', 'Date',
+                                    'Prediction', 'High or Low', 'All Causes',
+                                    'Cause 1',
+                                    'Cause 2', 'Cause 3', 'Cause 4', 'Cause 5'])
+    forecasts['High Causes'] = ((forecasts['All Causes']
                                 .apply(lambda x: [i for i in x if i in high]))
-    forecasts['Low Causes'] = (forecasts['Causes']
+                                .astype(str).str.replace('[' , '')
+                                .str.replace(']', ''))
+    forecasts['Low Causes'] = ((forecasts['All Causes']
                                 .apply(lambda x: [i for i in x if i in low]))
+                                .astype(str).str.replace('[' , '')
+                                .str.replace(']', ''))
     return forecasts
 
 def main():
-    pivot, original, recent = GetData()
+    full_data, pivot, original, recent = GetData()
     outliers, recent_trend = OutliersAndRecent(original, recent)
     correlations = Correlations(original, recent)
     forecasts = Forecasts(pivot)
-    return pivot, original, recent, outliers, recent_trend, correlations, forecasts
+    metrics = pd.DataFrame(full_data['metric'].drop_duplicates().reset_index(drop=True))
+    #unpivot data
+    historical = full_data.loc[full_data['dte'] < pd.to_datetime(date.today()
+                                                - relativedelta(days=+7))].copy()
+    last_7_days = full_data.loc[full_data['dte'] >= pd.to_datetime(date.today()
+                                                - relativedelta(days=+7))].copy()
+    return full_data, historical, last_7_days, outliers, recent_trend, correlations, forecasts, metrics
+
