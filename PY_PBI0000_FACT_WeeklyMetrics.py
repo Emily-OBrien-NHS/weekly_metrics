@@ -77,7 +77,6 @@ def GetData():
 #===========================================================================
 def OutliersAndRecent(original, recent):
     metrics = original.columns
-    limits = []
     all_outliers = []
     recent_trend = []
     for metric in metrics:
@@ -87,7 +86,7 @@ def OutliersAndRecent(original, recent):
         UQ = og_col.quantile(0.75)
         IQR = UQ - LQ
         upper = UQ + 1.5*IQR
-        lower = UQ + 1.5*IQR
+        lower = LQ - 1.5*IQR
         #Turn into dataframe, add blank type column
         col = pd.DataFrame(recent[metric].copy())
         col['type'] = ''
@@ -98,7 +97,6 @@ def OutliersAndRecent(original, recent):
         outliers = col.loc[col['type'] != ''].copy().reset_index()
         outliers['metric'] = metric
         all_outliers += outliers.values.tolist()
-        limits.append([metric, lower, upper])
 
         #recent trend
         if recent[metric].sum() > 0:
@@ -110,25 +108,23 @@ def OutliersAndRecent(original, recent):
                                         original[metric].to_numpy(),
                                         alternative='less',
                                         nan_policy='omit')[1]
+            og_mean = original[metric].mean()
+            l7d_mean = recent[metric].mean()
             if gt_pvalue < 0.05:
-                output = 'Last 7 days significantly higher than usual'
+                output = 'High'
+                recent_trend.append([metric, output, og_mean, l7d_mean])
             elif lt_pvalue < 0.05:
-                output = 'Last 7 days significantly lower than usual'
-            else:
-                output = 'No significant change in last 7 days'
-        else:
-            gt_pvalue = np.nan
-            lt_pvalue = np.nan
-            output = np.nan
-        recent_trend.append([metric, gt_pvalue, lt_pvalue, output])
+                output = 'Low'
+                recent_trend.append([metric, output, og_mean, l7d_mean])
 
     #create dataframe of all outliers.
-    limits = pd.DataFrame(limits, columns=['Metric', 'Lower', 'Upper'])
-    outliers = pd.DataFrame(all_outliers,
+    outliers = (pd.DataFrame(all_outliers,
                             columns=['Date', 'Data', 'Type', 'Metric'])
+                            [['Metric', 'Date', 'Data', 'Type']])
+    #create dataframe of recent trends.
     recent_trend = pd.DataFrame(recent_trend,
-                                columns=['Metric', 'Greater Pvalue',
-                                         'Less Pvalue', 'Recent Trend'])
+                                columns=['Metric', 'Last 7 Day Trend',
+                                         'Historical Mean', 'Last 7 Day Mean'])
     return outliers, recent_trend
 
 #===========================================================================
@@ -174,9 +170,11 @@ def Correlations(original, recent):
         sig_diff_test.append([z1, z2, z_obs, abs(z_obs) > critical_value])
         #If observed is less than the critical value, then the difference is significant
         #https://www.statisticssolutions.com/comparing-correlation-coefficients/#:~:text=The%20way%20to%20do%20this,the%20observed%20z%20test%20statistic.
-    corr[['Z1 score', 'Z2 Score', 'Z obs Score',
+    corr[['Z1 Score', 'Z2 Score', 'Z Obs Score',
           'Significant Difference']] = sig_diff_test
-    corr.reset_index()
+    corr = (corr.loc[corr['Significant Difference']].copy()
+            .sort_values(by='Z Obs Score', key=abs, ascending=False)
+            .reset_index())
     return corr
 
 def Forecasts(pivot):
@@ -259,13 +257,13 @@ def Forecasts(pivot):
             results.append([key, lag, prediction, high_or_low, features])
             lag += 1
 
-        forecasts = pd.DataFrame(results, columns=['Metric', 'Days Time',
-                                        'Prediction', 'High or Low', 'Causes'])
-        forecasts['High Causes'] = (forecasts['Causes']
-                                  .apply(lambda x: [i for i in x if i in high]))
-        forecasts['Low Causes'] = (forecasts['Causes']
-                                  .apply(lambda x: [i for i in x if i in low]))
-        return forecasts
+    forecasts = pd.DataFrame(results, columns=['Metric', 'Days Time',
+                                    'Prediction', 'High or Low', 'Causes'])
+    forecasts['High Causes'] = (forecasts['Causes']
+                                .apply(lambda x: [i for i in x if i in high]))
+    forecasts['Low Causes'] = (forecasts['Causes']
+                                .apply(lambda x: [i for i in x if i in low]))
+    return forecasts
 
 def main():
     pivot, original, recent = GetData()
@@ -273,6 +271,3 @@ def main():
     correlations = Correlations(original, recent)
     forecasts = Forecasts(pivot)
     return pivot, original, recent, outliers, recent_trend, correlations, forecasts
-
-pivot, original, recent = GetData()
-x=5
