@@ -169,19 +169,20 @@ def Correlations(original, recent):
             z_obs = ((z1 - z2) / (((1/(n1-3)) + (1/(n2-3)))**0.5))
         else:
             z_obs = np.nan
-        sig_diff_test.append([z_obs, abs(z_obs) > critical_value])
+        sig_diff_test.append([round(z_obs, 2), round(abs(z_obs), 2),
+                              abs(z_obs) > critical_value])
         #If observed is less than the critical value, then the difference is significant
         #https://www.statisticssolutions.com/comparing-correlation-coefficients/#:~:text=The%20way%20to%20do%20this,the%20observed%20z%20test%20statistic.
-    correlations[['Z Obs Score', 'Significant Difference']] = sig_diff_test
+    correlations[['Z Obs Score', 'Absolute Score', 'Significant Difference']] = sig_diff_test
     #Filter to only those where the correlation has changed significantly
     correlations = (correlations.loc[correlations['Significant Difference']].copy()
-            .sort_values(by='Z Obs Score', key=abs, ascending=False)
+            .sort_values(by='Absolute Score', ascending=False)
             .reset_index(drop=True).reset_index())
     #Melt so one metric column to create relationships in BI
-    correlations = correlations.melt(id_vars=['index', 'Z Obs Score'],
+    correlations = correlations.melt(id_vars=['index', 'Z Obs Score', 'Absolute Score'],
                                      value_vars=['Metric 1', 'Metric 2']
                                      ).sort_values(by='index')
-    correlations.columns = ['index', 'Obs Score', 'Metric No.', 'Metric']
+    correlations.columns = ['index', 'Obs Score', 'Absolute Score', 'Metric No.', 'Metric']
     return correlations
 
 def Forecasts(pivot):
@@ -262,8 +263,8 @@ def Forecasts(pivot):
 
             #Append results to list and increase lag
             results.append([key, lag,
-                 (date.today() + relativedelta(days=+lag)).strftime('%d/%m/%Y'),
-                  prediction, high_or_low, features] + features)
+                  (date.today() + relativedelta(days=+lag)).strftime('%Y-%m-%d'),
+                  round(prediction, 2), high_or_low, features] + features)
             lag += 1
 
     forecasts = pd.DataFrame(results, columns=['Metric', 'Days Time', 'Date',
@@ -283,13 +284,21 @@ def Forecasts(pivot):
 def main():
     full_data, pivot, original, recent = GetData()
     outliers, recent_trend = OutliersAndRecent(original, recent)
-    correlations = Correlations(original, recent)
+    correlation = Correlations(original, recent)
     forecasts = Forecasts(pivot)
     metrics = pd.DataFrame(full_data['metric'].drop_duplicates().reset_index(drop=True))
+    dates = pd.DataFrame({'Date': (full_data['dte'].drop_duplicates().tolist()
+                                   + [date.today().strftime('%Y-%m-%d')]
+                                   + forecasts['Date'].drop_duplicates().tolist())}).drop_duplicates()
+    dates['Date'] = pd.to_datetime(dates['Date'])
+
     #unpivot data
-    historical = full_data.loc[full_data['dte'] < pd.to_datetime(date.today()
+    full_data['dte'] = full_data['dte'].astype(str)
+    historical = full_data.loc[pd.to_datetime(full_data['dte'])
+                               < pd.to_datetime(date.today()
                                                 - relativedelta(days=+7))].copy()
-    last_7_days = full_data.loc[full_data['dte'] >= pd.to_datetime(date.today()
-                                                - relativedelta(days=+7))].copy()
-    return full_data, historical, last_7_days, outliers, recent_trend, correlations, forecasts, metrics
+    last_7_days = full_data.loc[pd.to_datetime(full_data['dte'])
+                                >= pd.to_datetime(date.today()
+                                                  - relativedelta(days=+7))].copy()
+    return full_data, historical, last_7_days, outliers, recent_trend, correlation, forecasts, metrics, dates
 
