@@ -51,12 +51,10 @@ def GetData():
                     'Weekend discharges as % of weekday discharges']
     df = df.loc[~(df['metric'].isin(remove_metrics))
                 & ~(df['metric'].str.lower().str.contains('weekly'))].copy()
+    df['data'] = np.where(df['metric'].str.contains('%'), df['data']*100, df['data'])
     #pivot to make a column per data
     pivot = (df.drop_duplicates(subset=['dte', 'metric'])
              .pivot(index='dte', columns='metric', values='data'))
-    #if % multiply by 100
-    percentages = [metric for metric in pivot.columns if '%' in metric]
-    pivot[percentages] = pivot[percentages] * 100
 
     #Orignal
     original = pivot.loc[pivot.index
@@ -294,11 +292,6 @@ def main():
 
     #unpivot data
     full_data['dte'] = full_data['dte'].astype(str)
-    historical = full_data.loc[pd.to_datetime(full_data['dte'])
-                               < pd.to_datetime(date.today()
-                                                - relativedelta(days=+7))].copy()
-    last_7_days = full_data.loc[pd.to_datetime(full_data['dte'])
-                                >= pd.to_datetime(date.today()
-                                                  - relativedelta(days=+7))].copy()
-    return full_data, historical, last_7_days, outliers, recent_trend, correlation, forecasts, metrics, dates
+
+    return full_data, outliers, recent_trend, correlation, forecasts, metrics, dates
 
