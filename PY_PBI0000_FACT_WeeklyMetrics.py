@@ -290,8 +290,10 @@ def main():
                                    + forecasts['Date'].drop_duplicates().tolist())}).drop_duplicates()
     dates['Date'] = pd.to_datetime(dates['Date'])
 
-    #unpivot data
+    #add in period column for plots
     full_data['dte'] = full_data['dte'].astype(str)
-
+    full_data['period'] = np.where(pd.to_datetime(full_data['dte'])
+                                   < pd.to_datetime(date.today() - relativedelta(days=+7)),
+                                   'Previous', 'Last 7 Days')
+    
     return full_data, outliers, recent_trend, correlation, forecasts, metrics, dates
-
